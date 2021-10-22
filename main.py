@@ -1,13 +1,29 @@
 import discord
+from discord.ext import tasks
 import os
 import requests
 import json
 from replit import db
 from threading import Timer
 from keep_alive import keep_alive
+from pycoingecko import CoinGeckoAPI
+import pandas as pd
 
 # instantiate a discord client
 client = discord.Client()
+
+# instantiate API connection to CoinGeckoAPI
+cg = CoinGeckoAPI()
+
+# get environment variables
+REFRESH_INTV = os.getenv("REFRESH_INTV")
+TOKEN = os.getenv("TOKEN")
+
+# initiate base path
+base_path = "./files"
+
+# initiate price container
+prices = None
 
 def check(pre):
   try: 
@@ -16,20 +32,22 @@ def check(pre):
     return False
 
 def getPrices(asset):
-  url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd'
-  response = requests.get(url)
-  data = response.json()
+  global prices
+  # url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd'
+  # response = requests.get(url)
+  # data = response.json()
 
-  # insert asset and prices into db
-  for i in range(len(data)):
-    ids = data[i]['id']
-    currentPrices = int(data[i]['current_price'])
-    db["ids"] = currentPrices
+  # # insert asset and prices into db
+  # for i in range(len(data)):
+  #   ids = data[i]['id']
+  #   currentPrices = int(data[i]['current_price'])
+  #   db[ids] = currentPrices
  
-  if "ids" in db.keys():
-    return db[asset]
-  else:
-    return None
+  # if ids in db.keys():
+  #   return db[asset]
+  # else:
+  #   return None
+  return prices[prices["id"] == asset]["current_price"]
 
 def isSupported(asset):
   if asset in db.keys():
@@ -42,6 +60,7 @@ async def on_ready():
   print('We have logged in as {0.user}'.format(client))
   channel = discord.utils.get(client.get_all_channels(), name='general')
   await client.get_channel(channel.id).send('Price Bot is now online!')
+  refresh_price.start()
 
 # function called whenever there is a message in the chat 
 @client.event
@@ -55,7 +74,7 @@ async def on_message(message):
   if msg.startswith('$price'):
     ids = msg.split('$price ',1)[1].lower()
     price = int(getPrices(ids))
-    await message.channel.send('USD {0}'.format(price))
+    await message.channel.send('USD {:,}'.format(price))
 
   # print list of supported assets
   if msg.startswith('$list'):
@@ -69,5 +88,13 @@ async def on_message(message):
     check = isSupported(asset)
     await message.channel.send(check)
 
-keep_alive()
-client.run(os.getenv('TOKEN'))
+@tasks.loop(seconds=float(REFRESH_INTV))
+async def refresh_price():
+  global prices
+  prices_json = cg.get_coins_markets(vs_currency="USD")
+  prices = pd.DataFrame(prices_json)
+
+
+if __name__ == "__main__":
+  keep_alive()
+  client.run(TOKEN)
